@@ -24,7 +24,9 @@ for solver in ${SOLVER_LIST}; do
     fi
     echo "Z3"
     # Should we install libz3-dbg too?
-    sudo apt-get -y install libz3 libz3-dev
+    echo `pwd`
+    wget -c https://github.com/Z3Prover/z3/releases/download/Z3-4.8.5/z3-4.8.5-x64-ubuntu-14.04.zip
+    unzip z3-4.8.5-x64-ubuntu-14.04.zip
     ;;
   metaSMT)
     echo "metaSMT"

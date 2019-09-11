@@ -45,8 +45,6 @@ RUN apt-get update && \
         binutils && \
     pip3 install -U lit tabulate && \
     update-alternatives --install /usr/bin/python python /usr/bin/python3 50 && \
-    ( wget -O - http://download.opensuse.org/repositories/home:delcypher:z3/xUbuntu_14.04/Release.key | apt-key add - ) && \
-    echo 'deb http://download.opensuse.org/repositories/home:/delcypher:/z3/xUbuntu_14.04/ /' >> /etc/apt/sources.list.d/z3.list && \
     apt-get update
 
 # Create ``klee`` user for container with password ``klee``.

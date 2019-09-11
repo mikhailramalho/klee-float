@@ -30,7 +30,7 @@ fi
 # klee-uclibc
 ###############################################################################
 if [ "${KLEE_UCLIBC}" != "0" ]; then
-    git clone --depth 1 -b ${KLEE_UCLIBC} git://github.com/klee/klee-uclibc.git
+    git clone --depth 1 -b ${KLEE_UCLIBC} https://github.com/klee/klee-uclibc.git
     cd klee-uclibc
     ./configure --make-llvm-lib --with-cc "${KLEE_CC}" --with-llvm-config /usr/bin/llvm-config-${LLVM_VERSION}
     make
@@ -72,7 +72,7 @@ if [ "X${USE_CMAKE}" == "X1" ]; then
       ;;
     Z3)
       echo "Z3"
-      KLEE_Z3_CONFIGURE_OPTION="-DENABLE_SOLVER_Z3=TRUE"
+      KLEE_Z3_CONFIGURE_OPTION="-DENABLE_SOLVER_Z3=TRUE -DZ3_INCLUDE_DIRS=${BUILD_DIR}/z3-4.8.5-x64-ubuntu-14.04/include -DZ3_LIBRARIES=${BUILD_DIR}/z3-4.8.5-x64-ubuntu-14.04/bin/libz3.so"
       ;;
     metaSMT)
       echo "metaSMT"
@@ -96,7 +96,7 @@ else
       ;;
     Z3)
       echo "Z3"
-      KLEE_Z3_CONFIGURE_OPTION="--with-z3=/usr"
+      KLEE_Z3_CONFIGURE_OPTION="--with-z3=${BUILD_DIR}/z3-4.8.5-x64-ubuntu-14.04/"
       ;;
     metaSMT)
       echo "metaSMT"
@@ -181,7 +181,7 @@ fi
 # Unit tests
 ###############################################################################
 if [ "X${USE_CMAKE}" == "X1" ]; then
-  make unittests
+  make
 else
   # The unittests makefile doesn't seem to have been packaged so get it from SVN
   sudo mkdir -p /usr/lib/llvm-${LLVM_VERSION}/build/unittests/
@@ -199,7 +199,7 @@ fi
 # lit tests
 ###############################################################################
 if [ "X${USE_CMAKE}" == "X1" ]; then
-  make systemtests
+  make
 else
   # Note can't use ``make check`` because llvm-lit is not available
   cd test
