@@ -101,7 +101,6 @@ Z3Builder::~Z3Builder() {
   // Clear caches so exprs/sorts gets freed before the destroying context
   // they aren associated with.
   clearConstructCache();
-  clearReplacements();
   clearSideConstraints();
   _arr_hash.clear();
   Z3_del_context(ctx);
@@ -491,14 +490,6 @@ Z3ASTHandle Z3Builder::getArrayForUpdate(const Array *root,
 /** if *width_out!=1 then result is a bitvector,
     otherwise it is a bool */
 Z3ASTHandle Z3Builder::construct(ref<Expr> e, int *width_out) {
-  // See if a replacement variable should be used instead of constructing
-  // the replacement expression.
-  ExprHashMap<Z3ASTHandle>::iterator replIt = replaceWithExpr.find(e);
-  if (replIt != replaceWithExpr.end()) {
-    if (width_out)
-      *width_out = e->getWidth();
-    return replIt->second;
-  }
   // TODO: We could potentially use Z3_simplify() here
   // to store simpler expressions.
   if (!UseConstructHashZ3 || isa<ConstantExpr>(e)) {
@@ -1400,21 +1391,6 @@ Z3ASTHandle Z3Builder::getFreshBitVectorVariable(unsigned bitWidth,
   Z3ASTHandle newVar =
       Z3ASTHandle(Z3_mk_fresh_const(ctx, /*prefix=*/prefix, sort), ctx);
   return newVar;
-}
-
-bool Z3Builder::addReplacementExpr(const ref<Expr> e, Z3ASTHandle replacement) {
-  std::pair<ExprHashMap<Z3ASTHandle>::iterator, bool> result =
-      replaceWithExpr.insert(std::make_pair(e, replacement));
-  return result.second;
-}
-
-void Z3Builder::clearReplacements() {
-  // FIXME: Try to find a way to avoid doing this. We don't always
-  // need to clear everything in the cache.
-  // We have to clear the cached update expressions because they may
-  // use replacement variables.
-  _arr_hash.clearUpdates();
-  replaceWithExpr.clear();
 }
 }
 #endif // ENABLE_Z3

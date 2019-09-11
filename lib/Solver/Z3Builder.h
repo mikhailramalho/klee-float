@@ -107,7 +107,6 @@ class Z3Builder {
   friend class Z3SolverImpl;
   ExprHashMap<std::pair<Z3ASTHandle, unsigned> > constructed;
   Z3ArrayExprHash _arr_hash;
-  ExprHashMap<Z3ASTHandle> replaceWithExpr;
   // These are additional constraints that are generated during the
   // translation to Z3's constraint language. Clients should assert
   // these.
@@ -208,16 +207,6 @@ public:
 
   // Create a fresh variable of bitvector type with the specified width.
   Z3ASTHandle getFreshBitVectorVariable(unsigned bitWidth, const char *prefix);
-
-  // Add replacement expression so that all uses of the expression `e` will be
-  // replaced with the `replacement`. This function can be called multiple
-  // times to add multiple replacements. The replacements are cleared by calling
-  // `clearReplacements`.
-  // Returns true if the replacement was successfully added.
-  bool addReplacementExpr(const ref<Expr> e, Z3ASTHandle replacement);
-
-  // Clear the stored replacement variables.
-  void clearReplacements();
 };
 }
 

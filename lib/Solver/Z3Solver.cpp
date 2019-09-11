@@ -83,9 +83,7 @@ void setCoreSolverTimeout(double _timeout) {
   SolverRunStatus handleSolverResponse(
       ::Z3_solver theSolver, ::Z3_lbool satisfiable,
       const std::vector<const Array *> *objects,
-      std::vector<std::vector<unsigned char> > *values, bool &hasSolution,
-      FindArrayAckermannizationVisitor &ffv,
-      std::map<const ArrayAckermannizationInfo *, Z3ASTHandle> &arrayReplacements);
+      std::vector<std::vector<unsigned char> > *values, bool &hasSolution);
 
   SolverRunStatus getOperationStatusCode();
 };
@@ -231,13 +229,6 @@ bool Z3SolverImpl::internalRunSolver(
 
   runStatusCode = SOLVER_RUN_STATUS_FAILURE;
 
-  // Try ackermannize the arrays
-  std::map<const ArrayAckermannizationInfo*,Z3ASTHandle> arrayReplacements;
-  FindArrayAckermannizationVisitor faav(/*recursive=*/false);
-  if (Z3AckermannizeArrays) {
-    ackermannizeArrays(this->builder, query, faav, arrayReplacements);
-  }
-
   for (ConstraintManager::const_iterator it = query.constraints.begin(),
                                          ie = query.constraints.end();
        it != ie; ++it) {
@@ -280,13 +271,7 @@ bool Z3SolverImpl::internalRunSolver(
 
   ::Z3_lbool satisfiable = Z3_solver_check(builder->ctx, theSolver);
   runStatusCode = handleSolverResponse(theSolver, satisfiable, objects, values,
-                                       hasSolution, faav, arrayReplacements);
-
-  if (Z3AckermannizeArrays) {
-    // Remove any replacements we made as accumulating these across
-    // solver runs might not be valid.
-    builder->clearReplacements();
-  }
+                                       hasSolution);
 
   Z3_solver_dec_ref(builder->ctx, theSolver);
   // Clear the builder's cache to prevent memory usage exploding.
@@ -315,9 +300,7 @@ bool Z3SolverImpl::internalRunSolver(
 SolverImpl::SolverRunStatus Z3SolverImpl::handleSolverResponse(
     ::Z3_solver theSolver, ::Z3_lbool satisfiable,
     const std::vector<const Array *> *objects,
-    std::vector<std::vector<unsigned char> > *values, bool &hasSolution,
-    FindArrayAckermannizationVisitor &ffv,
-    std::map<const ArrayAckermannizationInfo *, Z3ASTHandle> &arrayReplacements) {
+    std::vector<std::vector<unsigned char> > *values, bool &hasSolution) {
   switch (satisfiable) {
   case Z3_L_TRUE: {
     hasSolution = true;
@@ -337,57 +320,13 @@ SolverImpl::SolverRunStatus Z3SolverImpl::handleSolverResponse(
       const Array *array = *it;
       std::vector<unsigned char> data;
 
-      // See if there is any ackermannization info for this array
-      const std::vector<ArrayAckermannizationInfo>* aais = NULL;
-      FindArrayAckermannizationVisitor::ArrayToAckermannizationInfoMapTy::
-          const_iterator aiii = ffv.ackermannizationInfo.find(array);
-      if (aiii != ffv.ackermannizationInfo.end()) {
-        aais = &(aiii->second);
-      }
-
       data.reserve(array->size);
       for (unsigned offset = 0; offset < array->size; offset++) {
         // We can't use Z3ASTHandle here so have to do ref counting manually
         ::Z3_ast arrayElementExpr;
-        Z3ASTHandle initial_read = Z3ASTHandle();
-        if (aais && aais->size() > 0) {
-          // Look through the possible ackermannized regions of the array
-          // and find the region that corresponds to this byte.
-          for (std::vector<ArrayAckermannizationInfo>::const_iterator
-                   i = aais->begin(),
-                   ie = aais->end();
-               i != ie; ++i) {
-            const ArrayAckermannizationInfo* info = &(*i);
-            if (!(info->containsByte(offset))) {
-              continue;
-            }
+        Z3ASTHandle initial_read = builder->getInitialRead(array, offset);
 
-            // This is the ackermannized region for this offset.
-            Z3ASTHandle replacementVariable = arrayReplacements[info];
-            assert((offset*8) >= info->contiguousLSBitIndex);
-            unsigned bitOffsetToReadWithinVariable = (offset*8) - info->contiguousLSBitIndex;
-            assert(bitOffsetToReadWithinVariable < info->getWidth());
-            // Extract the byte
-            initial_read = Z3ASTHandle(
-                Z3_mk_extract(
-                    builder->ctx, /*high=*/bitOffsetToReadWithinVariable + 7,
-                    /*low=*/bitOffsetToReadWithinVariable, replacementVariable),
-                builder->ctx);
-            break;
-          }
-          if (Z3_ast(initial_read) == NULL) {
-            // The array was ackermannized but this particular byte
-            // wasn't which implies it wasn't used in the query.
-            // This implies the value for this byte doesn't matter
-            // so just assign zero for this byte.
-            data.push_back((unsigned char) 0);
-            continue;
-          }
-        } else {
-          // This array wasn't ackermannized.
-          initial_read = builder->getInitialRead(array, offset);
-        }
-
+        __attribute__((unused))
         bool successfulEval =
             Z3_model_eval(builder->ctx, theModel, initial_read,
                           /*model_completion=*/Z3_TRUE, &arrayElementExpr);
@@ -398,6 +337,7 @@ SolverImpl::SolverRunStatus Z3SolverImpl::handleSolverResponse(
                "Evaluated expression has wrong sort");
 
         int arrayElementValue = 0;
+        __attribute__((unused))
         bool successGet = Z3_get_numeral_int(builder->ctx, arrayElementExpr,
                                              &arrayElementValue);
         assert(successGet && "failed to get value back");
@@ -456,6 +396,7 @@ bool Z3SolverImpl::validateZ3Model(::Z3_solver &theSolver, ::Z3_model &theModel)
         Z3_ast_vector_get(builder->ctx, constraints, index), builder->ctx);
 
     ::Z3_ast rawEvaluatedExpr;
+    __attribute__((unused))
     bool successfulEval =
         Z3_model_eval(builder->ctx, theModel, constraint,
                       /*model_completion=*/Z3_TRUE, &rawEvaluatedExpr);
@@ -489,51 +430,6 @@ bool Z3SolverImpl::validateZ3Model(::Z3_solver &theSolver, ::Z3_model &theModel)
 
   Z3_ast_vector_dec_ref(builder->ctx, constraints);
   return success;
-}
-
-void Z3SolverImpl::ackermannizeArrays(
-    Z3Builder *z3Builder, const Query &query,
-    FindArrayAckermannizationVisitor &faav,
-    std::map<const ArrayAckermannizationInfo *, Z3ASTHandle>
-        &arrayReplacements) {
-  for (ConstraintManager::const_iterator it = query.constraints.begin(),
-                                         ie = query.constraints.end();
-       it != ie; ++it) {
-    faav.visit(*it);
-  }
-  faav.visit(query.expr);
-  for (FindArrayAckermannizationVisitor::ArrayToAckermannizationInfoMapTy::
-           const_iterator aaii = faav.ackermannizationInfo.begin(),
-                          aaie = faav.ackermannizationInfo.end();
-       aaii != aaie; ++aaii) {
-    const std::vector<ArrayAckermannizationInfo> &replacements = aaii->second;
-    for (std::vector<ArrayAckermannizationInfo>::const_iterator
-             i = replacements.begin(),
-             ie = replacements.end();
-         i != ie; ++i) {
-      // Taking a pointer like this is dangerous. If the std::vector<> gets
-      // resized the data might be invalidated.
-      const ArrayAckermannizationInfo *aaInfo = &(*i); // Safe?
-      // Replace with variable
-      std::string str;
-      llvm::raw_string_ostream os(str);
-      os << aaInfo->getArray()->name << "_ackermann";
-      assert(aaInfo->toReplace.size() > 0);
-      Z3ASTHandle replacementVar;
-      for (ExprHashSet::const_iterator ei = aaInfo->toReplace.begin(),
-                                       ee = aaInfo->toReplace.end();
-           ei != ee; ++ei) {
-        ref<Expr> toReplace = *ei;
-        if (replacementVar.isNull()) {
-          replacementVar = z3Builder->getFreshBitVectorVariable(
-              toReplace->getWidth(), os.str().c_str());
-        }
-        bool success = z3Builder->addReplacementExpr(toReplace, replacementVar);
-        assert(success && "Failed to add replacement variable");
-      }
-      arrayReplacements[aaInfo] = replacementVar;
-    }
-  }
 }
 
 SolverImpl::SolverRunStatus Z3SolverImpl::getOperationStatusCode() {
